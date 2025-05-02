@@ -100,6 +100,14 @@ function TMJ.FUNCS.filterCenters(prefilters, list) --Filter list using filters. 
                 local lineConcat = ""
                 for _, descLine in ipairs(descText) do
                     local processedLine = descLine
+                    if type(proccessedLine) == "table" then
+                        local n = next(processedLine)
+                        if type(n) == "string" then
+                            processedLine = n
+                        else
+                            processedLine = ""
+                        end
+                    end
                     processedLine = string.gsub(processedLine, "{[^}]+}", "") --remove any formatting tags, e.g. {C:legendary}
                     processedLine = string.gsub(processedLine, "#[^#]+#", "") --remove locvar tags, e.g. #1#
                     processedLine = string.gsub(processedLine, "{}", "")      --remove ending formatting tags, e.g. {}
@@ -168,6 +176,12 @@ function TMJ.FUNCS.filterCenters(prefilters, list) --Filter list using filters. 
     end
     for i, v in ipairs(indicesToRemove) do
         table.remove(matchedCenters, v)
+    end
+    for k, v in ipairs(matchedCenters) do
+        if TMJ.PINNED_KEYS[v.collectionInfo.key] then
+            table.remove(matchedCenters, k)
+            table.insert(matchedCenters, 1, v)
+        end
     end
 
 
@@ -251,4 +265,25 @@ function TMJ.FUNCS.cacheSorterIntermediary(...)
     end
     TMJ.SORTERCACHE[argspacked] = TMJ.FUNCS.getPCenterPoolsSorted(...)
     return TMJ.SORTERCACHE[argspacked]
+end
+
+
+local old = Card.click  
+function Card:click(...)
+    local flag
+    for i, v in pairs(G.TMJCOLLECTION or {}) do
+        if self.area == v then
+            flag = true
+        end
+    end
+    if not TMJ.FUNCS.isCtrlDown() then
+        flag = false
+    end
+    if not flag then return old(self, ...) end
+    --self is in tmj and we clicked with ctrl down
+    TMJ.PINNED_KEYS[self.config.center.key] = not TMJ.PINNED_KEYS[self.config.center.key]
+    TMJ.SEARCHERCACHE = {}
+    TMJ.SORTERCACHE = {}
+    G.FUNCS.TMJUIBOX("reload")
+    return old(self, ...)
 end
