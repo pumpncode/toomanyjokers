@@ -1,3 +1,4 @@
+---@diagnostic disable: unbalanced-assignments
 function TMJ.FUNCS.ui_box()
     local def = TMJ.FUNCS.inner_nodes()
     return UIBox {
@@ -104,6 +105,15 @@ function TMJ.FUNCS.make_cards()
     local size_div = 1 / TMJ.config.size
     local initial_offset = TMJ.config.columns * TMJ.scrolled_amount
     local centers = TMJ.FUNCS.get_centers(TMJ.thegreatfilter, initial_offset, TMJ.config.columns * TMJ.config.rows)
+
+
+    local edition
+    local edition_match = string.match(TMJ.thegreatfilter, "{edition:.+}")
+    if edition_match then
+        local subbed = edition_match:gsub("{edition:", "")
+        subbed = string.sub(subbed, 1, #subbed-1)
+        edition = subbed
+    end
     for row = 1, TMJ.config.rows do
         for col = 1, TMJ.config.columns do
             local indice = (row - 1) * TMJ.config.columns + col
@@ -114,6 +124,11 @@ function TMJ.FUNCS.make_cards()
                 local card = Card(G.TMJCOLLECTION[row].T.x + G.TMJCOLLECTION[row].T.w / 2, G.TMJCOLLECTION[row].T.y,
                     G.CARD_W / (size_div or 1),
                     G.CARD_H / (size_div or 1), nil, key)
+                if edition then
+                    card.edition = card.edition or {}
+                    card.edition[edition] = true
+                    card.edition.key = "e_"..edition
+                end
                 if TMJ.config.pinned_keys[key] then
                     SMODS.Stickers.tmj_pinned:apply(card, true)
                 end
@@ -122,7 +137,7 @@ function TMJ.FUNCS.make_cards()
                 end
                 card.sticker = get_joker_win_sticker(key)
                 G.TMJCOLLECTION[row]:emplace(card)
-                if string.sub(key, 1, 1) == "e" then
+                if string.sub(key, 1, 1) == "e" and not edition then
                     if not card.edition then card.edition = {} end
                     card.edition[string.sub(key, 3)] = true
                 end
@@ -134,8 +149,12 @@ end
 
 function TMJ.FUNCS.scroll(y)
     local prev_amt = TMJ.scrolled_amount
-    if TMJ.scrolled_amount + y >= 0 then
-        TMJ.scrolled_amount = TMJ.scrolled_amount + y
+    TMJ.scrolled_amount = TMJ.scrolled_amount + y
+    if math.floor(TMJ.scrolled_amount) == math.floor(prev_amt) then
+        return
+    end
+
+    if TMJ.scrolled_amount >= 0 then
         TMJ.FUNCS.reload()
     else
         TMJ.scrolled_amount = 0
@@ -156,16 +175,6 @@ function TMJ.FUNCS.reload()
     TMJ.FUNCS.make_tag_stuff()
 end
 
-local old = Card.click
-function Card:click(...)
-    if self.area and self.area.config.tmj and G.CONTROLLER.held_keys['lctrl'] then
-        TMJ.config.pinned_keys[self.config.center.key] = not TMJ.config.pinned_keys[self.config.center.key]
-        TMJ.FUNCS.process_centers()
-        TMJ.FUNCS.reload()
-        SMODS.save_mod_config(TMJ)
-    end
-    old(self, ...)
-end
 
 function TMJ.FUNCS.make_tag_stuff()
     local major = assert(G.TMJUI)
@@ -175,6 +184,26 @@ function TMJ.FUNCS.make_tag_stuff()
         config = { align = 'cr', offset = { x = 0, y = 0 }, instance_type = "POPUP", major = major, bond = 'Weak' }
     }
     G.TMJTAGS = uib
+
+    TMJ.FUNCS.place_tags_before_tmjui()
+end
+
+function TMJ.FUNCS.place_tags_before_tmjui()
+    local tmjui, uiindex = G.TMJUI
+    local tmjtags, tagsindex = G.TMJTAGS
+    for i, v in ipairs(G.I.POPUP) do
+        if v == tmjtags then
+            tagsindex = i
+        elseif v == tmjui then
+            uiindex = i
+        end
+        if uiindex and tagsindex then
+            local put_tags = math.min(uiindex, tagsindex)
+            local put_ui = put_tags == uiindex and tagsindex or uiindex
+            G.I.POPUP[put_tags], G.I.POPUP[put_ui] = tmjtags, tmjui
+            break
+        end
+    end
 end
 
 function TMJ.FUNCS.inner_tags()
@@ -225,7 +254,7 @@ end
 
 function TMJ.FUNCS.getModtagInfo(mod)
     local tag_pos, tag_message, tag_atlas = { x = 0, y = 0 }, "tmj_this_mods_cards", mod.prefix and mod.prefix .. '_modicon' or 'modicon'
-    local specific_vars = {mod.name}
+    local specific_vars = {mod.display_name}
 
     return tag_atlas, tag_pos, tag_message, specific_vars
 end
@@ -285,7 +314,7 @@ function TMJ.FUNCS.buildModtag(mod)
             G.FUNCS.CloseTMJ()
             G.FUNCS["openModUI_" .. mod.id](self)
         else
-            TMJ.thegreatfilter = "mod:"..mod.name
+            TMJ.thegreatfilter = "%%%%"..mod.name
             G.ENTERED_FILTER = ""
             TMJ.scrolled_amount = 0
             TMJ.FUNCS.reload()

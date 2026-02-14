@@ -1,4 +1,4 @@
-local NFS = NFS or require("nativefs")
+local NFS = SMODS.NFS or NFS
 TMJ = assert(SMODS.current_mod)
 TMJ.FUNCS = {}
 TMJ.CACHES = {
@@ -12,21 +12,26 @@ TMJ.default_config = {
     rows = 4,
     columns = 4,
     size = 0.7,
+    sensitivity = 1,
     pinned_keys = {},
     hide_undiscovered = false,
     close_on_esc = false,
     scroll_full_page = false,
-    disable_ctrl_enter = false,
+    disable_cheats = false,
     arrow_key_scroll = false,
     show_all_tags = false,
+    autofocus = true,
+    hide_no_collection = true,
 }
 
 for i, v in pairs(TMJ.default_config) do
-    TMJ.config[i] = TMJ.config[i] or v
+    if TMJ.config[i] == nil then
+        TMJ.config[i] = v
+    end
 end
 
 SMODS.save_mod_config(TMJ)
-if _RELEASE_MODE then TMJ.config.disable_ctrl_enter = true end
+if _RELEASE_MODE then TMJ.config.disable_cheats = true end
 local old = SMODS.save_mod_config
 function SMODS.save_mod_config(mod)
     if mod == TMJ then
@@ -39,18 +44,25 @@ function SMODS.save_mod_config(mod)
 end
 
 TMJ.DEBUG = true
+
+
 local scripts = { "utils", "config", "searcher", "ui", "banner", "compat" }
 local tests = {}
 for i, v in ipairs(scripts) do
     assert(SMODS.load_file("TMJ/" .. v .. ".lua"))()
-    if TMJ.DEBUG and _G[v .. "_unit_tests"] then
+
+    if TMJ.DEBUG and _G[v.."_unit_tests"] then
         table.insert(tests, _G[v .. "_unit_tests"])
     end
 end
+
+
+
 G.FUNCS.CloseTMJ = function()
     G.TMJUI:remove()
     G.TMJTAGS:remove()
     G.TMJUI = nil
+    G.TMJTAGS = nil
     TMJ.thegreatfilter = ""
     G.ENTERED_FILTER = ""
     for i, v in pairs(G.TMJCOLLECTION) do
@@ -65,7 +77,7 @@ function love.wheelmoved(x, y)
         if TMJ.config.scroll_full_page then
             TMJ.FUNCS.scroll(-(y * TMJ.config.rows))
         else
-            TMJ.FUNCS.scroll(-y)
+            TMJ.FUNCS.scroll(-y * TMJ.config.sensitivity)
         end
     end
 end
@@ -80,6 +92,10 @@ end
 local upd_ref = love.update
 function love.update(dt)
     upd_ref(dt)
+    if TMJ.config.disable_ctrl_enter then
+        TMJ.config.disable_cheats = true
+    end
+    
     if G.TMJUI and TMJ.held_arrow and TMJ.held_arrow_time and not TMJ.config.scroll_full_page then
         if love.timer.getTime() - 0.35 > TMJ.held_arrow_time then
             if love.timer.getTime() - 0.15 > TMJ.last_arrow_time then
@@ -89,21 +105,6 @@ function love.update(dt)
         end
     end
 end
-
-SMODS.Keybind({
-    key = "openTMJ",
-    key_pressed = "t",
-    action = function()
-        if G.TMJUI then
-            if not TMJ.config.close_on_esc then
-                G.FUNCS.CloseTMJ()
-            end
-        else
-            TMJ.FUNCS.reload()
-        end
-    end
-})
-
 local old = love.keypressed
 local wanted_chars = table_into_hashset(collect(string.gmatch("abcdefghijklmnopqrstuvwxyz[]!", ".")))
 wanted_chars["return"] = true
@@ -112,6 +113,17 @@ function love.keypressed(key)
     if key == "escape" and G.TMJUI and TMJ.config.close_on_esc then
         G.FUNCS.CloseTMJ()
         return
+    end
+    if key == "t" and not G.CONTROLLER.text_input_hook and not is_debugplus_console_open() then
+        if G.TMJUI then
+            if not TMJ.config.close_on_esc then
+                G.FUNCS.CloseTMJ()
+                return
+            end
+        else
+            TMJ.FUNCS.reload()
+            return
+        end
     end
     if TMJ.config.arrow_key_scroll and G.TMJUI then
         local mul = ((G.CONTROLLER.held_keys.lctrl or G.CONTROLLER.held_keys.rctrl or TMJ.config.scroll_full_page) and TMJ.config.rows) or 1
@@ -127,7 +139,7 @@ function love.keypressed(key)
             TMJ.FUNCS.scroll(1 * mul)
         end
     end
-    if not TMJ.config.disable_ctrl_enter and key == "return" and G.CONTROLLER.held_keys.lctrl and G.TMJUI and G.CONTROLLER.text_input_hook and G.TMJUI:get_UIE_by_ID("TMJTEXTINP") and G.TMJUI:get_UIE_by_ID("TMJTEXTINP").children[1].children[1].children[1] == G.CONTROLLER.text_input_hook then
+    if not TMJ.config.disable_cheats and key == "return" and G.CONTROLLER.held_keys.lctrl and G.TMJUI and G.CONTROLLER.text_input_hook and G.TMJUI:get_UIE_by_ID("TMJTEXTINP") and G.TMJUI:get_UIE_by_ID("TMJTEXTINP").children[1].children[1].children[1] == G.CONTROLLER.text_input_hook then
         TMJ.thegreatfilter = G.ENTERED_FILTER
         G.ENTERED_FILTER = ""
         TMJ.scrolled_amount = 0
@@ -163,7 +175,7 @@ function love.keypressed(key)
             return old(key)
         end
     end
-    if G.TMJUI and wanted_chars[key] and G.TMJUI:get_UIE_by_ID("TMJTEXTINP") then
+    if G.TMJUI and wanted_chars[key] and G.TMJUI:get_UIE_by_ID("TMJTEXTINP") and TMJ.config.autofocus then
         G.FUNCS.select_text_input(G.TMJUI:get_UIE_by_ID("TMJTEXTINP").children[1])
     end
     old(key)
@@ -236,6 +248,19 @@ create_UIBox_generic_options = function(arg1, ...) --inserts the text into most 
 end
 
 
+local old = Card.click
+function Card:click(...)
+    if self.area and self.area.config.tmj and G.CONTROLLER.held_keys['lctrl'] then
+        TMJ.config.pinned_keys[self.config.center.key] = not TMJ.config.pinned_keys[self.config.center.key]
+        TMJ.FUNCS.process_centers()
+        TMJ.FUNCS.reload()
+        SMODS.save_mod_config(TMJ)
+    end
+    old(self, ...)
+end
+
+
 for i, v in ipairs(tests) do
     v()
 end
+

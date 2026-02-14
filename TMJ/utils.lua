@@ -92,3 +92,10 @@ function collect(iter)
     end
     return ret
 end
+
+function is_debugplus_console_open()
+    local succ, dbp = pcall(require, "debugplus.console")
+    if succ and dbp and dbp.isConsoleFocused and dbp.isConsoleFocused() then
+        return true
+    end
+end

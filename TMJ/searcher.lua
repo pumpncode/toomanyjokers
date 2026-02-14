@@ -7,7 +7,7 @@ local main_funcs = {
         if badge == "ERROR" then
             badge = nil
         end
-        return "key" .. (badge or center.set or "")
+        return badge or center.set or ""
     end,
     function(center)
         local raritystring
@@ -17,10 +17,10 @@ local main_funcs = {
         if raritystring == "ERROR" or not raritystring then
             raritystring = tostring(center.rarity)
         end
-        return "rarity:" .. raritystring
+        return raritystring
     end,
     function(center)
-        return "set:" .. (center.set or "")
+        return center.set or ""
     end,
     function(center)
         local strs = {}
@@ -34,9 +34,9 @@ local main_funcs = {
                     for _, t in ipairs(nameText) do
                         name = name .. t
                     end
-                    table.insert(strs, "name:" .. name)     --this is localized name
+                    table.insert(strs, name)     --this is localized name
                 elseif type(nameText) == "string" then
-                    table.insert(strs, "name:" .. nameText) --this is localized name
+                    table.insert(strs, nameText) --this is localized name
                 end
                 local descText = ourDescription.text or {}  --description
                 local lineConcat = ""
@@ -66,11 +66,23 @@ local main_funcs = {
     function(center)
         if center.original_mod then
             local modname = center.original_mod.name or ""
-            return "mod:" .. modname --match against the name of the mod that implemented this center
+            return modname 
         else
-            return "mod:vanilla"
+            return "vanilla"
         end
-    end
+    end,
+    function(center)
+        if center.original_mod then
+            local modname = center.original_mod.name or ""
+            return "%%%%"..modname 
+        else
+            return "vanilla"
+        end
+    end,
+    function(center)
+        return center.key
+    end,
+
 }
 
 
@@ -78,10 +90,13 @@ local main_funcs = {
 TMJ.SEARCH_FIELD_FUNCS = main_funcs
 TMJ.INVALIDATE_CENTER_FUNCS = {
     function(center)
+        return not center.set
+    end,
+    function(center)
         return not center.key
     end,
     function(center)
-        return center.no_collection
+        return center.no_collection and TMJ.config.hide_no_collection
     end,
     function(center)
         return TMJ.config.hide_undiscovered and not (center.discovered and center.unlocked)
@@ -110,32 +125,76 @@ function TMJ.FUNCS.get_center_strings(center)
     return all
 end
 
+local cached_loads = {}
+
 function TMJ.FUNCS.does_match(center, match_string)
-    local strings = TMJ.FUNCS.get_center_strings(center)
-    local all_match_strings = string.split(lower_spaceless(match_string), ",")
-    local use_any, use_regex
-    local remove = {}
     for i, v in pairs(TMJ.INVALIDATE_CENTER_FUNCS) do
         if v(center) then
             return false
         end
     end
+    local strings = TMJ.FUNCS.get_center_strings(center)
+    local ace = string.match(match_string, "{ace:.+}")
+    if ace then
+        match_string = string.gsub(match_string, "{ace:.+},?", "")
+    end
+    local all_match_strings = string.split(lower_spaceless(match_string), ",")
+    local other_match_strings = string.split(match_string, ",")
+    local use_any, use_regex
+    local remove = 0
     --extract magic terms
-    for i, v in ipairs(all_match_strings) do
+
+
+    if ace and not TMJ.config.disable_cheats then
+        local inner = ace:sub(1, #ace - 1):sub(6)
+        local func_str = "return function(center) return " .. inner .. " end"
+        local err
+        local func = cached_loads[func_str]
+        if not func then
+            func, err = load(func_str, "TMJ_EVAL")()
+            cached_loads[func_str] = func
+        end
+        if func then
+            local succ, res = pcall(func, center)
+            if not (succ and res) then
+                return false
+            end
+        else
+            local func_str = "return function(center) " .. inner .. " end"
+
+            local func = cached_loads[func_str] or load(func_str, "TMJ_EVAL")()
+            if func then
+                cached_loads[func_str] = func
+                local succ, res = pcall(func, center)
+                if not (succ and res) then
+                    return false
+                end
+            else
+                print(func_str, err)
+            end
+        end
+    end
+
+    for i, v in ipairs(other_match_strings) do
         if v == "{any}" then
-            table.insert(remove, i)
+            remove = remove + 1
             use_any = true
         elseif v == "{regex}" then
-            table.insert(remove, i)
+            remove = remove + 1
             use_regex = true
+        elseif string.match(v, "{edition:.+}") then
+            remove = remove + 1
+        else
+            break
         end
     end
     --slow but whatever
-    for _, v in pairs(remove) do
-        table.remove(all_match_strings, v)
+    for i = 1, remove do
+        table.remove(all_match_strings, 1)
     end
     local any_flag = false
     local all_flag = true
+
     --do matching (any hingers)
     for _, mstr in pairs(all_match_strings) do
         local negate = false
